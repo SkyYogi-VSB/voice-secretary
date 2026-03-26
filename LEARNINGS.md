@@ -58,3 +58,25 @@ Captured from building Voice Secretary (March 2026).
 - Toast messages for status feedback (auth state, save confirmation, errors).
 - Green dot indicator for Drive connection status.
 - Week label (W13 2026) gives context without clutter.
+
+## Security Hardening (from external audit)
+
+- Extract inline JS to separate `.js` file so CSP can drop `unsafe-inline` — this is the single biggest XSS mitigation for a static PWA.
+- Never use `.innerHTML` with any string, even hardcoded ones. Use `.textContent` — prevents future regressions if someone adds dynamic content later.
+- Always check `resp.ok` on API responses. Don't assume non-401 means success — handle 403 (quota), 404, 500 etc. with clear error messages.
+- `drive.file` scope is defense-in-depth: even if token is stolen from localStorage, attacker can only access app-created files.
+- Authorized JavaScript origins on the OAuth client act as the primary gate — attacker can't use your Client ID from a different domain.
+
+## Development Workflow
+
+- Version stamp in UI (`v11`) is essential for mobile debugging — no DevTools, so you need visual confirmation of what's deployed.
+- Bump SW cache version on every push. Forget this once and you'll waste 20 minutes wondering why nothing changed.
+- `curl` the deployed files from terminal to verify Pages has the latest — faster than waiting and refreshing on phone.
+- Build first, git init later. Privacy audit before first commit. Separate config into its own file early.
+- Use a second AI agent to audit security — catches blind spots from the building agent.
+
+## Google Drive API Gotchas
+
+- `drive.file` scope means the app can't see manually-created folders — only files it created itself. If user pre-creates folders, the app will create duplicates.
+- Weekly file append pattern: find file by name in folder → download content → append → upload. No native "append" API in Drive.
+- Use `uploadType=multipart` for create (metadata + content), `uploadType=media` for update (content only).

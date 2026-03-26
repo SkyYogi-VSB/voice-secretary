@@ -263,7 +263,8 @@
   function initSpeech() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast('Speech recognition not supported', true);
+      showToast('Speech API not available', true);
+      placeholderText.innerHTML = 'Speech recognition not supported on this browser.';
       return;
     }
 
@@ -271,6 +272,10 @@
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      showToast('Listening...');
+    };
 
     recognition.onresult = (e) => {
       let interim = '';
@@ -289,8 +294,12 @@
     };
 
     recognition.onerror = (e) => {
-      if (e.error !== 'no-speech') {
-        showToast('Mic error: ' + e.error, true);
+      showToast('Mic error: ' + e.error, true);
+      if (e.error === 'not-allowed') {
+        placeholderText.innerHTML = 'Microphone blocked. Tap the lock icon in the address bar to allow.';
+        placeholderText.style.display = 'block';
+        isRecording = false;
+        recBtn.classList.remove('recording');
       }
     };
 
@@ -300,6 +309,8 @@
         try { recognition.start(); } catch (_) {}
       }
     };
+
+    showToast('Speech ready');
   }
 
   function toggleRecording() {

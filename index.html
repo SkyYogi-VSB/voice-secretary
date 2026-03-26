@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#e94560">
+  <link rel="manifest" href="manifest.json">
+  <title>Voice Secretary</title>
+  <script src="config.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .status-bar {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .status-bar .week {
+      background: #16213e;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+
+    .status-bar .drive-status {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #555;
+    }
+    .status-bar .drive-status.connected { background: #4ecca3; }
+
+    .transcript-area {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .transcript-area .placeholder {
+      color: #444;
+      text-align: center;
+      margin-top: 30vh;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    #transcript {
+      font-size: 17px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    #interim {
+      color: #666;
+      font-style: italic;
+    }
+
+    .controls {
+      padding: 16px;
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+
+    .record-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .rec-btn {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      border: 3px solid #e94560;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .rec-btn .inner {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: #e94560;
+      transition: all 0.2s;
+    }
+
+    .rec-btn.recording .inner {
+      border-radius: 6px;
+      width: 24px; height: 24px;
+      background: #ff6b6b;
+    }
+
+    .rec-btn.recording {
+      border-color: #ff6b6b;
+      box-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .tag-btn {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: all 0.15s;
+    }
+
+    .tag-btn:active { transform: scale(0.97); }
+
+    .tag-btn.work {
+      background: #0f3460;
+      color: #4cc9f0;
+    }
+
+    .tag-btn.personal {
+      background: #1a0a2e;
+      color: #b388ff;
+    }
+
+    .tag-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #16213e;
+      color: #4ecca3;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 14px;
+      opacity: 0;
+      transition: all 0.3s;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast.error { color: #ff6b6b; }
+  </style>
+</head>
+<body>
+
+<div class="status-bar">
+  <span id="weekLabel" class="week"></span>
+  <div id="driveStatus" class="drive-status" title="Drive connection"></div>
+</div>
+
+<div class="transcript-area">
+  <div id="placeholderText" class="placeholder">
+    Tap the button and speak.<br>Your note will be transcribed live.
+  </div>
+  <div id="transcript"></div>
+  <span id="interim"></span>
+</div>
+
+<div class="controls">
+  <div class="record-row">
+    <button class="rec-btn" id="recBtn" aria-label="Record">
+      <div class="inner"></div>
+    </button>
+  </div>
+  <div class="tag-row">
+    <button class="tag-btn work" id="workBtn" disabled>Save to Work</button>
+    <button class="tag-btn personal" id="personalBtn" disabled>Save to Personal</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Config (loaded from config.js) ──
+  const CLIENT_ID = CONFIG.GOOGLE_CLIENT_ID;
+  const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+  const FOLDER_NAMES = {
+    work: CONFIG.WORK_FOLDER_NAME,
+    personal: CONFIG.PERSONAL_FOLDER_NAME
+  };
+
+  // ── State ──
+  let recognition = null;
+  let isRecording = false;
+  let finalTranscript = '';
+  let tokenClient = null;
+  let accessToken = null;
+  let driveFolderIds = {}; // { work, personal }
+
+  // ── DOM ──
+  const recBtn = document.getElementById('recBtn');
+  const workBtn = document.getElementById('workBtn');
+  const personalBtn = document.getElementById('personalBtn');
+  const transcriptEl = document.getElementById('transcript');
+  const interimEl = document.getElementById('interim');
+  const placeholderText = document.getElementById('placeholderText');
+  const weekLabel = document.getElementById('weekLabel');
+  const driveStatus = document.getElementById('driveStatus');
+  const toastEl = document.getElementById('toast');
+
+  // ── Week calculation ──
+  function getISOWeek(d) {
+    const date = new Date(d);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+    const week1 = new Date(date.getFullYear(), 0, 4);
+    return {
+      year: date.getFullYear(),
+      week: Math.round(((date - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7) + 1
+    };
+  }
+
+  function getWeekFileName() {
+    const { year, week } = getISOWeek(new Date());
+    return `${year}-W${String(week).padStart(2, '0')}.md`;
+  }
+
+  function updateWeekLabel() {
+    const { year, week } = getISOWeek(new Date());
+    weekLabel.textContent = `W${week} · ${year}`;
+  }
+
+  // ── Toast ──
+  function showToast(msg, isError = false) {
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show' + (isError ? ' error' : '');
+    setTimeout(() => { toastEl.className = 'toast'; }, 2500);
+  }
+
+  // ── Speech Recognition ──
+  function initSpeech() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported', true);
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalTranscript += t + ' ';
+        } else {
+          interim += t;
+        }
+      }
+      transcriptEl.textContent = finalTranscript;
+      interimEl.textContent = interim;
+      placeholderText.style.display = 'none';
+      updateSaveButtons();
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error !== 'no-speech') {
+        showToast('Mic error: ' + e.error, true);
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if still in recording mode (Android kills it periodically)
+      if (isRecording) {
+        try { recognition.start(); } catch (_) {}
+      }
+    };
+  }
+
+  function toggleRecording() {
+    if (!recognition) return;
+
+    if (isRecording) {
+      isRecording = false;
+      recognition.stop();
+      recBtn.classList.remove('recording');
+    } else {
+      // Reset for new note
+      finalTranscript = '';
+      transcriptEl.textContent = '';
+      interimEl.textContent = '';
+      placeholderText.style.display = 'none';
+      updateSaveButtons();
+
+      isRecording = true;
+      recBtn.classList.add('recording');
+      recognition.start();
+    }
+  }
+
+  function updateSaveButtons() {
+    const hasText = finalTranscript.trim().length > 0;
+    workBtn.disabled = !hasText || isRecording;
+    personalBtn.disabled = !hasText || isRecording;
+  }
+
+  // ── Google Identity Services ──
+  function initGoogleAuth() {
+    // Load the GIS library
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = () => {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (resp) => {
+          if (resp.error) {
+            showToast('Auth failed', true);
+            return;
+          }
+          accessToken = resp.access_token;
+          driveStatus.classList.add('connected');
+          showToast('Drive connected');
+          ensureFolders();
+        }
+      });
+    };
+    document.head.appendChild(script);
+  }
+
+  function ensureAuth() {
+    return new Promise((resolve, reject) => {
+      if (accessToken) { resolve(); return; }
+      tokenClient.callback = (resp) => {
+        if (resp.error) { reject(resp.error); return; }
+        accessToken = resp.access_token;
+        driveStatus.classList.add('connected');
+        resolve();
+      };
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    });
+  }
+
+  // ── Google Drive Operations ──
+  async function driveRequest(url, opts = {}) {
+    const resp = await fetch(url, {
+      ...opts,
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        ...(opts.headers || {})
+      }
+    });
+    if (resp.status === 401) {
+      // Token expired — re-auth
+      accessToken = null;
+      driveStatus.classList.remove('connected');
+      await ensureAuth();
+      return driveRequest(url, opts);
+    }
+    return resp;
+  }
+
+  async function findOrCreateFolder(name, parentId = null) {
+    let q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    if (parentId) q += ` and '${parentId}' in parents`;
+
+    const resp = await driveRequest(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
+    );
+    const data = await resp.json();
+
+    if (data.files && data.files.length > 0) {
+      return data.files[0].id;
+    }
+
+    // Create it
+    const meta = {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      ...(parentId ? { parents: [parentId] } : {})
+    };
+    const createResp = await driveRequest('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(meta)
+    });
+    const created = await createResp.json();
+    return created.id;
+  }
+
+  async function ensureFolders() {
+    try {
+      driveFolderIds.work = await findOrCreateFolder(FOLDER_NAMES.work);
+      driveFolderIds.personal = await findOrCreateFolder(FOLDER_NAMES.personal);
+    } catch (e) {
+      showToast('Folder setup failed', true);
+    }
+  }
+
+  async function findWeeklyFile(folderId, fileName) {
+    const q = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
+    const resp = await driveRequest(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
+    );
+    const data = await resp.json();
+    return (data.files && data.files.length > 0) ? data.files[0].id : null;
+  }
+
+  async function getFileContent(fileId) {
+    const resp = await driveRequest(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`
+    );
+    return resp.text();
+  }
+
+  async function createFile(folderId, fileName, content) {
+    const metadata = {
+      name: fileName,
+      parents: [folderId],
+      mimeType: 'text/markdown'
+    };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', new Blob([content], { type: 'text/markdown' }));
+
+    const resp = await driveRequest(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      { method: 'POST', body: form }
+    );
+    return resp.json();
+  }
+
+  async function updateFile(fileId, content) {
+    const resp = await driveRequest(
+      `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'text/markdown' },
+        body: content
+      }
+    );
+    return resp.json();
+  }
+
+  // ── Save Note ──
+  async function saveNote(context) {
+    const text = finalTranscript.trim();
+    if (!text) return;
+
+    workBtn.disabled = true;
+    personalBtn.disabled = true;
+
+    try {
+      await ensureAuth();
+      if (!driveFolderIds.work) await ensureFolders();
+
+      const folderId = driveFolderIds[context];
+      const fileName = getWeekFileName();
+      const now = new Date();
+      const timestamp = now.toISOString().slice(0, 16).replace('T', ' ');
+
+      const entry = `\n### ${timestamp}\n${text}\n`;
+
+      const existingId = await findWeeklyFile(folderId, fileName);
+
+      if (existingId) {
+        const existing = await getFileContent(existingId);
+        await updateFile(existingId, existing + entry);
+      } else {
+        const header = `# Voice Notes — ${context} — ${fileName.replace('.md', '')}\n`;
+        await createFile(folderId, fileName, header + entry);
+      }
+
+      showToast(`Saved to ${context}`);
+
+      // Reset
+      finalTranscript = '';
+      transcriptEl.textContent = '';
+      interimEl.textContent = '';
+      placeholderText.style.display = 'block';
+      updateSaveButtons();
+
+    } catch (e) {
+      console.error(e);
+      showToast('Save failed: ' + e.message, true);
+      updateSaveButtons();
+    }
+  }
+
+  // ── Init ──
+  updateWeekLabel();
+  initSpeech();
+  initGoogleAuth();
+
+  recBtn.addEventListener('click', toggleRecording);
+  workBtn.addEventListener('click', () => saveNote('work'));
+  personalBtn.addEventListener('click', () => saveNote('personal'));
+
+  // Stop recording when save buttons become relevant
+  recBtn.addEventListener('click', () => setTimeout(updateSaveButtons, 100));
+
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+
+</body>
+</html>

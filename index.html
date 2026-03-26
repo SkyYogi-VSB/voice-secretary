@@ -150,6 +150,23 @@
       cursor: default;
     }
 
+    .discard-btn {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: 2px solid #444;
+      background: transparent;
+      color: #888;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: all 0.15s;
+    }
+    .discard-btn:active { border-color: #ff6b6b; color: #ff6b6b; }
+    .discard-btn:disabled { opacity: 0; pointer-events: none; }
+
     .toast {
       position: fixed;
       bottom: 120px;
@@ -190,9 +207,11 @@
 
 <div class="controls">
   <div class="record-row">
+    <button class="discard-btn" id="discardBtn" disabled aria-label="Discard">&#x2715;</button>
     <button class="rec-btn" id="recBtn" aria-label="Record">
       <div class="inner"></div>
     </button>
+    <div style="width:44px"></div>
   </div>
   <div class="tag-row">
     <button class="tag-btn work" id="workBtn" disabled>Save to Work</button>
@@ -228,6 +247,7 @@
   const placeholderText = document.getElementById('placeholderText');
   const weekLabel = document.getElementById('weekLabel');
   const driveStatus = document.getElementById('driveStatus');
+  const discardBtn = document.getElementById('discardBtn');
   const toastEl = document.getElementById('toast');
 
   // ── Week calculation ──
@@ -339,6 +359,21 @@
     const hasText = finalTranscript.trim().length > 0;
     workBtn.disabled = !hasText || isRecording;
     personalBtn.disabled = !hasText || isRecording;
+    discardBtn.disabled = !hasText && !isRecording;
+  }
+
+  function discard() {
+    if (isRecording) {
+      isRecording = false;
+      recognition.stop();
+      recBtn.classList.remove('recording');
+    }
+    finalTranscript = '';
+    transcriptEl.textContent = '';
+    interimEl.textContent = '';
+    placeholderText.style.display = 'block';
+    updateSaveButtons();
+    showToast('Discarded');
   }
 
   // ── Google Identity Services ──
@@ -530,6 +565,7 @@
   initGoogleAuth();
 
   recBtn.addEventListener('click', toggleRecording);
+  discardBtn.addEventListener('click', discard);
   workBtn.addEventListener('click', () => saveNote('work'));
   personalBtn.addEventListener('click', () => saveNote('personal'));
 

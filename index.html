@@ -377,21 +377,27 @@
     // Load the GIS library
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
+    script.onerror = () => showToast('Failed to load Google auth script', true);
     script.onload = () => {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        callback: (resp) => {
-          if (resp.error) {
-            showToast('Auth failed', true);
-            return;
+      try {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: (resp) => {
+            if (resp.error) {
+              showToast('Auth: ' + resp.error + ' - ' + (resp.error_description || ''), true);
+              return;
+            }
+            accessToken = resp.access_token;
+            driveStatus.classList.add('connected');
+            showToast('Drive connected');
+            ensureFolders();
           }
-          accessToken = resp.access_token;
-          driveStatus.classList.add('connected');
-          showToast('Drive connected');
-          ensureFolders();
-        }
-      });
+        });
+        showToast('Auth ready');
+      } catch (e) {
+        showToast('Auth init error: ' + e.message, true);
+      }
     };
     document.head.appendChild(script);
   }
@@ -400,9 +406,14 @@
     return new Promise((resolve, reject) => {
       if (accessToken) { resolve(); return; }
       tokenClient.callback = (resp) => {
-        if (resp.error) { reject(resp.error); return; }
+        if (resp.error) {
+          showToast('Auth: ' + resp.error + ' - ' + (resp.error_description || ''), true);
+          reject(resp.error);
+          return;
+        }
         accessToken = resp.access_token;
         driveStatus.classList.add('connected');
+        showToast('Drive connected');
         resolve();
       };
       tokenClient.requestAccessToken({ prompt: 'consent' });

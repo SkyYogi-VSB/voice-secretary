@@ -1,5 +1,5 @@
-const CACHE_NAME = 'voice-sec-v10';
-const ASSETS = ['./', './index.html', './manifest.json'];
+const CACHE_NAME = 'voice-sec-v11';
+const ASSETS = ['./', './index.html', './manifest.json', './config.js', './app.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));

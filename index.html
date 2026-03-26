@@ -278,13 +278,14 @@
     };
 
     recognition.onresult = (e) => {
+      // Rebuild final transcript from ALL results to avoid duplicates
+      finalTranscript = '';
       let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
+      for (let i = 0; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalTranscript += t + ' ';
+          finalTranscript += e.results[i][0].transcript + ' ';
         } else {
-          interim += t;
+          interim += e.results[i][0].transcript;
         }
       }
       transcriptEl.textContent = finalTranscript;

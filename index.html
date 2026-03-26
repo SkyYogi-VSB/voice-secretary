@@ -237,7 +237,8 @@
   let finalTranscript = '';
   let savedTranscript = ''; // accumulated text across auto-restarts
   let tokenClient = null;
-  let accessToken = null;
+  let accessToken = localStorage.getItem('vs_access_token');
+  let tokenExpiry = parseInt(localStorage.getItem('vs_token_expiry') || '0');
   let driveFolderIds = {}; // { work, personal }
 
   // ── DOM ──
@@ -254,7 +255,7 @@
   const versionLabel = document.getElementById('versionLabel');
   const toastEl = document.getElementById('toast');
 
-  const APP_VERSION = 'v8';
+  const APP_VERSION = 'v9';
   versionLabel.textContent = APP_VERSION;
 
   // ── Week calculation ──
@@ -398,8 +399,7 @@
               showToast('Auth: ' + resp.error + ' - ' + (resp.error_description || ''), true);
               return;
             }
-            accessToken = resp.access_token;
-            driveStatus.classList.add('connected');
+            saveToken(resp.access_token, resp.expires_in || 3600);
             showToast('Drive connected');
             ensureFolders();
           }
@@ -412,21 +412,41 @@
     document.head.appendChild(script);
   }
 
+  function saveToken(token, expiresIn) {
+    accessToken = token;
+    tokenExpiry = Date.now() + (expiresIn * 1000);
+    localStorage.setItem('vs_access_token', token);
+    localStorage.setItem('vs_token_expiry', String(tokenExpiry));
+    driveStatus.classList.add('connected');
+  }
+
+  function clearToken() {
+    accessToken = null;
+    tokenExpiry = 0;
+    localStorage.removeItem('vs_access_token');
+    localStorage.removeItem('vs_token_expiry');
+    driveStatus.classList.remove('connected');
+  }
+
+  function isTokenValid() {
+    return accessToken && Date.now() < tokenExpiry;
+  }
+
   function ensureAuth() {
     return new Promise((resolve, reject) => {
-      if (accessToken) { resolve(); return; }
+      if (isTokenValid()) { resolve(); return; }
+      clearToken();
       tokenClient.callback = (resp) => {
         if (resp.error) {
           showToast('Auth: ' + resp.error + ' - ' + (resp.error_description || ''), true);
           reject(resp.error);
           return;
         }
-        accessToken = resp.access_token;
-        driveStatus.classList.add('connected');
+        saveToken(resp.access_token, resp.expires_in || 3600);
         showToast('Drive connected');
         resolve();
       };
-      tokenClient.requestAccessToken({ prompt: 'consent' });
+      tokenClient.requestAccessToken({ prompt: '' });
     });
   }
 
@@ -440,9 +460,7 @@
       }
     });
     if (resp.status === 401) {
-      // Token expired — re-auth
-      accessToken = null;
-      driveStatus.classList.remove('connected');
+      clearToken();
       await ensureAuth();
       return driveRequest(url, opts);
     }
@@ -579,6 +597,7 @@
 
   // ── Init ──
   updateWeekLabel();
+  if (isTokenValid()) driveStatus.classList.add('connected');
   initSpeech();
   initGoogleAuth();
 

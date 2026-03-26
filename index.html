@@ -194,6 +194,7 @@
 
 <div class="status-bar">
   <span id="weekLabel" class="week"></span>
+  <span id="versionLabel" style="font-size:11px;color:#555;"></span>
   <div id="driveStatus" class="drive-status" title="Drive connection"></div>
 </div>
 
@@ -207,11 +208,11 @@
 
 <div class="controls">
   <div class="record-row">
-    <button class="discard-btn" id="discardBtn" disabled aria-label="Discard">&#x2715;</button>
+    <button class="discard-btn" id="discardBtnL" disabled aria-label="Discard">&#x2715;</button>
     <button class="rec-btn" id="recBtn" aria-label="Record">
       <div class="inner"></div>
     </button>
-    <div style="width:44px"></div>
+    <button class="discard-btn" id="discardBtnR" disabled aria-label="Discard">&#x2715;</button>
   </div>
   <div class="tag-row">
     <button class="tag-btn work" id="workBtn" disabled>Save to Work</button>
@@ -248,8 +249,13 @@
   const placeholderText = document.getElementById('placeholderText');
   const weekLabel = document.getElementById('weekLabel');
   const driveStatus = document.getElementById('driveStatus');
-  const discardBtn = document.getElementById('discardBtn');
+  const discardBtnL = document.getElementById('discardBtnL');
+  const discardBtnR = document.getElementById('discardBtnR');
+  const versionLabel = document.getElementById('versionLabel');
   const toastEl = document.getElementById('toast');
+
+  const APP_VERSION = 'v8';
+  versionLabel.textContent = APP_VERSION;
 
   // ── Week calculation ──
   function getISOWeek(d) {
@@ -290,7 +296,7 @@
     }
 
     recognition = new SpeechRecognition();
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
@@ -299,21 +305,16 @@
     };
 
     recognition.onresult = (e) => {
-      // Build transcript for this recognition session only
-      let sessionFinal = '';
-      let interim = '';
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          sessionFinal += e.results[i][0].transcript + ' ';
-        } else {
-          interim += e.results[i][0].transcript;
-        }
+      const result = e.results[0];
+      if (result.isFinal) {
+        finalTranscript = savedTranscript + result[0].transcript + ' ';
+        savedTranscript = finalTranscript;
+        transcriptEl.textContent = finalTranscript;
+        interimEl.textContent = '';
+      } else {
+        transcriptEl.textContent = savedTranscript;
+        interimEl.textContent = result[0].transcript;
       }
-      // Combine with text saved from previous sessions (auto-restarts)
-      transcriptEl.textContent = savedTranscript + sessionFinal;
-      interimEl.textContent = interim;
-      // Update finalTranscript for saving
-      finalTranscript = savedTranscript + sessionFinal;
       placeholderText.style.display = 'none';
       updateSaveButtons();
     };
@@ -362,7 +363,8 @@
     const hasText = finalTranscript.trim().length > 0;
     workBtn.disabled = !hasText || isRecording;
     personalBtn.disabled = !hasText || isRecording;
-    discardBtn.disabled = !hasText && !isRecording;
+    discardBtnL.disabled = !hasText && !isRecording;
+    discardBtnR.disabled = !hasText && !isRecording;
   }
 
   function discard() {
@@ -589,7 +591,8 @@
   recBtn.addEventListener('mouseup', (e) => { e.preventDefault(); stopRecording(); });
   recBtn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
 
-  discardBtn.addEventListener('click', discard);
+  discardBtnL.addEventListener('click', discard);
+  discardBtnR.addEventListener('click', discard);
   workBtn.addEventListener('click', () => saveNote('work'));
   personalBtn.addEventListener('click', () => saveNote('personal'));
 

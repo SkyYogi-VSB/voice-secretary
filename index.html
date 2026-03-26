@@ -234,6 +234,7 @@
   let recognition = null;
   let isRecording = false;
   let finalTranscript = '';
+  let savedTranscript = ''; // accumulated text across auto-restarts
   let tokenClient = null;
   let accessToken = null;
   let driveFolderIds = {}; // { work, personal }
@@ -298,18 +299,21 @@
     };
 
     recognition.onresult = (e) => {
-      // Rebuild final transcript from ALL results to avoid duplicates
-      finalTranscript = '';
+      // Build transcript for this recognition session only
+      let sessionFinal = '';
       let interim = '';
       for (let i = 0; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalTranscript += e.results[i][0].transcript + ' ';
+          sessionFinal += e.results[i][0].transcript + ' ';
         } else {
           interim += e.results[i][0].transcript;
         }
       }
-      transcriptEl.textContent = finalTranscript;
+      // Combine with text saved from previous sessions (auto-restarts)
+      transcriptEl.textContent = savedTranscript + sessionFinal;
       interimEl.textContent = interim;
+      // Update finalTranscript for saving
+      finalTranscript = savedTranscript + sessionFinal;
       placeholderText.style.display = 'none';
       updateSaveButtons();
     };
@@ -325,6 +329,8 @@
     };
 
     recognition.onend = () => {
+      // Save accumulated text before auto-restart
+      savedTranscript = finalTranscript;
       // Auto-restart if still in recording mode (Android kills it periodically)
       if (isRecording) {
         try { recognition.start(); } catch (_) {}
@@ -337,6 +343,7 @@
   function startRecording() {
     if (!recognition || isRecording) return;
     placeholderText.style.display = 'none';
+    savedTranscript = finalTranscript; // preserve any existing text from previous presses
     isRecording = true;
     recBtn.classList.add('recording');
     recognition.start();
@@ -365,6 +372,7 @@
       recBtn.classList.remove('recording');
     }
     finalTranscript = '';
+    savedTranscript = '';
     transcriptEl.textContent = '';
     interimEl.textContent = '';
     placeholderText.style.display = 'block';
@@ -554,6 +562,7 @@
 
       // Reset
       finalTranscript = '';
+      savedTranscript = '';
       transcriptEl.textContent = '';
       interimEl.textContent = '';
       placeholderText.style.display = 'block';

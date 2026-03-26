@@ -199,7 +199,7 @@
 
 <div class="transcript-area">
   <div id="placeholderText" class="placeholder">
-    Tap the button and speak.<br>Your note will be transcribed live.
+    Hold the button and speak.<br>Release when done.
   </div>
   <div id="transcript"></div>
   <span id="interim"></span>
@@ -334,25 +334,21 @@
     showToast('Speech ready');
   }
 
-  function toggleRecording() {
-    if (!recognition) return;
+  function startRecording() {
+    if (!recognition || isRecording) return;
+    placeholderText.style.display = 'none';
+    isRecording = true;
+    recBtn.classList.add('recording');
+    recognition.start();
+    updateSaveButtons();
+  }
 
-    if (isRecording) {
-      isRecording = false;
-      recognition.stop();
-      recBtn.classList.remove('recording');
-    } else {
-      // Reset for new note
-      finalTranscript = '';
-      transcriptEl.textContent = '';
-      interimEl.textContent = '';
-      placeholderText.style.display = 'none';
-      updateSaveButtons();
-
-      isRecording = true;
-      recBtn.classList.add('recording');
-      recognition.start();
-    }
+  function stopRecording() {
+    if (!isRecording) return;
+    isRecording = false;
+    recognition.stop();
+    recBtn.classList.remove('recording');
+    updateSaveButtons();
   }
 
   function updateSaveButtons() {
@@ -564,13 +560,18 @@
   initSpeech();
   initGoogleAuth();
 
-  recBtn.addEventListener('click', toggleRecording);
+  // Push-to-talk: hold to record, release to stop
+  recBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+  recBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+  recBtn.addEventListener('touchcancel', (e) => { e.preventDefault(); stopRecording(); });
+  // Mouse fallback for desktop testing
+  recBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
+  recBtn.addEventListener('mouseup', (e) => { e.preventDefault(); stopRecording(); });
+  recBtn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
+
   discardBtn.addEventListener('click', discard);
   workBtn.addEventListener('click', () => saveNote('work'));
   personalBtn.addEventListener('click', () => saveNote('personal'));
-
-  // Stop recording when save buttons become relevant
-  recBtn.addEventListener('click', () => setTimeout(updateSaveButtons, 100));
 
   // Register service worker
   if ('serviceWorker' in navigator) {

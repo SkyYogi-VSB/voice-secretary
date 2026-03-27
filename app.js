@@ -1,10 +1,12 @@
 // ── Config (loaded from config.js) ──
 const CLIENT_ID = CONFIG.GOOGLE_CLIENT_ID;
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send';
 const FOLDER_NAMES = {
   work: CONFIG.WORK_FOLDER_NAME,
   personal: CONFIG.PERSONAL_FOLDER_NAME
 };
+const WORK_EMAIL = CONFIG.WORK_EMAIL;
+const SENT_MARKER = '\n---SENT---\n';
 
 // ── State ──
 let recognition = null;
@@ -20,39 +22,36 @@ let driveFolderIds = {}; // { work, personal }
 const recBtn = document.getElementById('recBtn');
 const workBtn = document.getElementById('workBtn');
 const personalBtn = document.getElementById('personalBtn');
+const sendBtn = document.getElementById('sendBtn');
 const transcriptEl = document.getElementById('transcript');
 const interimEl = document.getElementById('interim');
 const placeholderText = document.getElementById('placeholderText');
-const weekLabel = document.getElementById('weekLabel');
+const dateLabel = document.getElementById('dateLabel');
 const driveStatus = document.getElementById('driveStatus');
 const discardBtnL = document.getElementById('discardBtnL');
 const discardBtnR = document.getElementById('discardBtnR');
 const versionLabel = document.getElementById('versionLabel');
 const toastEl = document.getElementById('toast');
 
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 versionLabel.textContent = APP_VERSION;
 
-// ── Week calculation ──
-function getISOWeek(d) {
-  const date = new Date(d);
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
-  const week1 = new Date(date.getFullYear(), 0, 4);
-  return {
-    year: date.getFullYear(),
-    week: Math.round(((date - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7) + 1
-  };
+// Force re-auth on version change (new scope needs consent)
+if (localStorage.getItem('vs_app_version') !== APP_VERSION) {
+  localStorage.removeItem('vs_access_token');
+  localStorage.removeItem('vs_token_expiry');
+  accessToken = null;
+  tokenExpiry = 0;
+  localStorage.setItem('vs_app_version', APP_VERSION);
 }
 
-function getWeekFileName() {
-  const { year, week } = getISOWeek(new Date());
-  return `${year}-W${String(week).padStart(2, '0')}.md`;
+// ── Date helpers ──
+function getDayFileName() {
+  return new Date().toISOString().slice(0, 10) + '.md';
 }
 
-function updateWeekLabel() {
-  const { year, week } = getISOWeek(new Date());
-  weekLabel.textContent = `W${week} · ${year}`;
+function updateDateLabel() {
+  dateLabel.textContent = new Date().toISOString().slice(0, 10);
 }
 
 // ── Toast ──
@@ -83,7 +82,8 @@ function initSpeech() {
   recognition.onresult = (e) => {
     const result = e.results[0];
     if (result.isFinal) {
-      finalTranscript = savedTranscript + result[0].transcript + ' ';
+      const text = result[0].transcript.replace(/\bhashtag\s+/gi, '#');
+      finalTranscript = savedTranscript + text + ' ';
       savedTranscript = finalTranscript;
       transcriptEl.textContent = finalTranscript;
       interimEl.textContent = '';
@@ -106,9 +106,7 @@ function initSpeech() {
   };
 
   recognition.onend = () => {
-    // Save accumulated text before auto-restart
     savedTranscript = finalTranscript;
-    // Auto-restart if still in recording mode (Android kills it periodically)
     if (isRecording) {
       try { recognition.start(); } catch (_) {}
     }
@@ -120,9 +118,10 @@ function initSpeech() {
 function startRecording() {
   if (!recognition || isRecording) return;
   placeholderText.style.display = 'none';
-  savedTranscript = finalTranscript; // preserve any existing text from previous presses
+  savedTranscript = finalTranscript;
   isRecording = true;
   recBtn.classList.add('recording');
+  navigator.vibrate?.(50);
   recognition.start();
   updateSaveButtons();
 }
@@ -132,6 +131,7 @@ function stopRecording() {
   isRecording = false;
   recognition.stop();
   recBtn.classList.remove('recording');
+  navigator.vibrate?.([30, 30, 30]);
   updateSaveButtons();
 }
 
@@ -139,8 +139,22 @@ function updateSaveButtons() {
   const hasText = finalTranscript.trim().length > 0;
   workBtn.disabled = !hasText || isRecording;
   personalBtn.disabled = !hasText || isRecording;
+  // Send button: disable if active unsaved transcript or recording
+  if (hasText || isRecording) {
+    sendBtn.disabled = true;
+  }
+  // Otherwise sendBtn state is managed by updateSendButton()
   discardBtnL.disabled = !hasText && !isRecording;
   discardBtnR.disabled = !hasText && !isRecording;
+}
+
+function clearTranscript() {
+  finalTranscript = '';
+  savedTranscript = '';
+  transcriptEl.textContent = '';
+  interimEl.textContent = '';
+  placeholderText.style.display = 'block';
+  updateSaveButtons();
 }
 
 function discard() {
@@ -149,18 +163,12 @@ function discard() {
     recognition.stop();
     recBtn.classList.remove('recording');
   }
-  finalTranscript = '';
-  savedTranscript = '';
-  transcriptEl.textContent = '';
-  interimEl.textContent = '';
-  placeholderText.style.display = 'block';
-  updateSaveButtons();
+  clearTranscript();
   showToast('Discarded');
 }
 
 // ── Google Identity Services ──
 function initGoogleAuth() {
-  // Load the GIS library
   const script = document.createElement('script');
   script.src = 'https://accounts.google.com/gsi/client';
   script.onerror = () => showToast('Failed to load Google auth script', true);
@@ -175,7 +183,7 @@ function initGoogleAuth() {
             return;
           }
           saveToken(resp.access_token, resp.expires_in || 3600);
-          showToast('Drive connected');
+          showToast('Connected');
           ensureFolders();
         }
       });
@@ -218,7 +226,7 @@ function ensureAuth() {
         return;
       }
       saveToken(resp.access_token, resp.expires_in || 3600);
-      showToast('Drive connected');
+      showToast('Connected');
       resolve();
     };
     tokenClient.requestAccessToken({ prompt: '' });
@@ -240,7 +248,7 @@ async function driveRequest(url, opts = {}, _retried = false) {
     return driveRequest(url, opts, true);
   }
   if (!resp.ok) {
-    throw new Error(`Drive API error: ${resp.status} ${resp.statusText}`);
+    throw new Error(`API error: ${resp.status} ${resp.statusText}`);
   }
   return resp;
 }
@@ -258,7 +266,6 @@ async function findOrCreateFolder(name, parentId = null) {
     return data.files[0].id;
   }
 
-  // Create it
   const meta = {
     name,
     mimeType: 'application/vnd.google-apps.folder',
@@ -277,12 +284,13 @@ async function ensureFolders() {
   try {
     driveFolderIds.work = await findOrCreateFolder(FOLDER_NAMES.work);
     driveFolderIds.personal = await findOrCreateFolder(FOLDER_NAMES.personal);
+    updateSendButton();
   } catch (e) {
     showToast('Folder setup failed', true);
   }
 }
 
-async function findWeeklyFile(folderId, fileName) {
+async function findDailyFile(folderId, fileName) {
   const q = `name='${fileName}' and '${folderId}' in parents and trashed=false`;
   const resp = await driveRequest(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
@@ -327,6 +335,69 @@ async function updateFile(fileId, content) {
   return resp.json();
 }
 
+// ── Sent tracking ──
+function getUnsentContent(fileContent) {
+  const lastMarker = fileContent.lastIndexOf('---SENT---');
+  if (lastMarker === -1) {
+    // No marker — everything after first line (header) is unsent
+    const firstNewline = fileContent.indexOf('\n');
+    return firstNewline === -1 ? '' : fileContent.slice(firstNewline + 1).trim();
+  }
+  return fileContent.slice(lastMarker + '---SENT---'.length).trim();
+}
+
+function hasUnsentContent(fileContent) {
+  return getUnsentContent(fileContent).length > 0;
+}
+
+// ── Gmail send ──
+async function sendEmail(to, subject, body) {
+  const message = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    body
+  ].join('\r\n');
+
+  const encoded = btoa(unescape(encodeURIComponent(message)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  await driveRequest('https://www.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: encoded })
+  });
+}
+
+// ── Send to Work button state ──
+async function updateSendButton() {
+  // Don't enable send if there's unsaved transcript
+  if (finalTranscript.trim().length > 0 || isRecording) {
+    sendBtn.disabled = true;
+    return;
+  }
+
+  try {
+    if (!isTokenValid() || !driveFolderIds.work) {
+      sendBtn.disabled = true;
+      return;
+    }
+    const fileName = getDayFileName();
+    const fileId = await findDailyFile(driveFolderIds.work, fileName);
+    if (!fileId) {
+      sendBtn.disabled = true;
+      return;
+    }
+    const content = await getFileContent(fileId);
+    sendBtn.disabled = !hasUnsentContent(content);
+  } catch (e) {
+    sendBtn.disabled = true;
+  }
+}
+
 // ── Save Note ──
 async function saveNote(context) {
   const text = finalTranscript.trim();
@@ -334,19 +405,20 @@ async function saveNote(context) {
 
   workBtn.disabled = true;
   personalBtn.disabled = true;
+  sendBtn.disabled = true;
 
   try {
     await ensureAuth();
     if (!driveFolderIds.work) await ensureFolders();
 
     const folderId = driveFolderIds[context];
-    const fileName = getWeekFileName();
+    const fileName = getDayFileName();
     const now = new Date();
-    const timestamp = now.toISOString().slice(0, 16).replace('T', ' ');
+    const timeStr = now.toTimeString().slice(0, 5);
 
-    const entry = `\n### ${timestamp}\n${text}\n`;
+    const entry = `\n### ${timeStr}\n${text}\n`;
 
-    const existingId = await findWeeklyFile(folderId, fileName);
+    const existingId = await findDailyFile(folderId, fileName);
 
     if (existingId) {
       const existing = await getFileContent(existingId);
@@ -357,14 +429,13 @@ async function saveNote(context) {
     }
 
     showToast(`Saved to ${context}`);
+    navigator.vibrate?.(100);
+    clearTranscript();
 
-    // Reset
-    finalTranscript = '';
-    savedTranscript = '';
-    transcriptEl.textContent = '';
-    interimEl.textContent = '';
-    placeholderText.style.display = 'block';
-    updateSaveButtons();
+    // Update send button after saving to work
+    if (context === 'work') {
+      await updateSendButton();
+    }
 
   } catch (e) {
     console.error(e);
@@ -373,8 +444,50 @@ async function saveNote(context) {
   }
 }
 
+// ── Send to Work ──
+async function sendToWork() {
+  sendBtn.disabled = true;
+
+  try {
+    await ensureAuth();
+    if (!driveFolderIds.work) await ensureFolders();
+
+    const fileName = getDayFileName();
+    const fileId = await findDailyFile(driveFolderIds.work, fileName);
+
+    if (!fileId) {
+      showToast('Nothing to send', true);
+      return;
+    }
+
+    const content = await getFileContent(fileId);
+    const unsent = getUnsentContent(content);
+
+    if (!unsent) {
+      showToast('Nothing to send', true);
+      return;
+    }
+
+    // Email unsent content
+    const dateStr = fileName.replace('.md', '');
+    await sendEmail(WORK_EMAIL, `COS:${dateStr}`, unsent);
+
+    // Append sent marker to Drive file
+    await updateFile(fileId, content + SENT_MARKER);
+
+    showToast('Sent to work');
+    navigator.vibrate?.([50, 50, 100]);
+    sendBtn.disabled = true;
+
+  } catch (e) {
+    console.error(e);
+    showToast('Send failed: ' + e.message, true);
+    await updateSendButton();
+  }
+}
+
 // ── Init ──
-updateWeekLabel();
+updateDateLabel();
 if (isTokenValid()) driveStatus.classList.add('connected');
 initSpeech();
 initGoogleAuth();
@@ -392,6 +505,7 @@ discardBtnL.addEventListener('click', discard);
 discardBtnR.addEventListener('click', discard);
 workBtn.addEventListener('click', () => saveNote('work'));
 personalBtn.addEventListener('click', () => saveNote('personal'));
+sendBtn.addEventListener('click', () => sendToWork());
 
 // Register service worker
 if ('serviceWorker' in navigator) {

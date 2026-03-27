@@ -1,4 +1,4 @@
-const CACHE_NAME = 'voice-sec-v11';
+const CACHE_NAME = 'voice-sec-v12';
 const ASSETS = ['./', './index.html', './manifest.json', './config.js', './app.js'];
 
 self.addEventListener('install', e => {

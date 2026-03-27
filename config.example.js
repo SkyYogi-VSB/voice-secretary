@@ -2,5 +2,6 @@
 const CONFIG = {
   GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
   WORK_FOLDER_NAME: 'cos-notes-work',
-  PERSONAL_FOLDER_NAME: 'cos-notes-personal'
+  PERSONAL_FOLDER_NAME: 'cos-notes-personal',
+  WORK_EMAIL: 'your-work-email@company.com'
 };

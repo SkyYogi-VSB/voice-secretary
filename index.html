@@ -32,7 +32,7 @@
       align-items: center;
     }
 
-    .status-bar .week {
+    .status-bar .date-badge {
       background: #16213e;
       padding: 4px 10px;
       border-radius: 12px;
@@ -74,20 +74,26 @@
     }
 
     .controls {
-      padding: 16px;
-      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      padding: 12px 16px;
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    .discard-row {
+      display: flex;
+      justify-content: center;
+      gap: 120px;
+      margin-bottom: 8px;
     }
 
     .record-row {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 16px;
       margin-bottom: 12px;
     }
 
     .rec-btn {
-      width: 72px; height: 72px;
+      width: 88px; height: 88px;
       border-radius: 50%;
       border: 3px solid #e94560;
       background: transparent;
@@ -100,7 +106,7 @@
     }
 
     .rec-btn .inner {
-      width: 32px; height: 32px;
+      width: 38px; height: 38px;
       border-radius: 50%;
       background: #e94560;
       transition: all 0.2s;
@@ -108,7 +114,7 @@
 
     .rec-btn.recording .inner {
       border-radius: 6px;
-      width: 24px; height: 24px;
+      width: 28px; height: 28px;
       background: #ff6b6b;
     }
 
@@ -120,6 +126,11 @@
     .tag-row {
       display: flex;
       gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .send-row {
+      display: flex;
     }
 
     .tag-btn {
@@ -146,18 +157,23 @@
       color: #b388ff;
     }
 
+    .tag-btn.send {
+      background: #2e1a0a;
+      color: #f0a04c;
+    }
+
     .tag-btn:disabled {
       opacity: 0.3;
       cursor: default;
     }
 
     .discard-btn {
-      width: 44px; height: 44px;
+      width: 40px; height: 40px;
       border-radius: 50%;
       border: 2px solid #444;
       background: transparent;
       color: #888;
-      font-size: 20px;
+      font-size: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -170,7 +186,7 @@
 
     .toast {
       position: fixed;
-      bottom: 120px;
+      bottom: 180px;
       left: 50%;
       transform: translateX(-50%) translateY(20px);
       background: #16213e;
@@ -194,7 +210,7 @@
 <body>
 
 <div class="status-bar">
-  <span id="weekLabel" class="week"></span>
+  <span id="dateLabel" class="date-badge"></span>
   <span id="versionLabel" style="font-size:11px;color:#555;"></span>
   <div id="driveStatus" class="drive-status" title="Drive connection"></div>
 </div>
@@ -208,16 +224,21 @@
 </div>
 
 <div class="controls">
-  <div class="record-row">
+  <div class="discard-row">
     <button class="discard-btn" id="discardBtnL" disabled aria-label="Discard">&#x2715;</button>
+    <button class="discard-btn" id="discardBtnR" disabled aria-label="Discard">&#x2715;</button>
+  </div>
+  <div class="record-row">
     <button class="rec-btn" id="recBtn" aria-label="Record">
       <div class="inner"></div>
     </button>
-    <button class="discard-btn" id="discardBtnR" disabled aria-label="Discard">&#x2715;</button>
   </div>
   <div class="tag-row">
     <button class="tag-btn work" id="workBtn" disabled>Save to Work</button>
     <button class="tag-btn personal" id="personalBtn" disabled>Save to Personal</button>
+  </div>
+  <div class="send-row">
+    <button class="tag-btn send" id="sendBtn" disabled>Send to Work</button>
   </div>
 </div>
 
